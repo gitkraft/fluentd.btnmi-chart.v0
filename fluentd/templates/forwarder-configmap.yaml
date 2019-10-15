@@ -1,43 +1,93 @@
+{{- if not .Values.forwarder.configMap -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ include "fluentd.fullname" . }}-forwarder-cm
-  labels: {{ include "fluentd.labels" . | nindent 4 }}
+  labels: {{- include "fluentd.labels" . | nindent 4 }}
+    app.kubernetes.io/component: forwarder
 data:
-  forwarder.conf: |
-    # TCP input
+  fluentd.conf: |
+    {{- if .Values.metrics.enabled -}}
+    # Prometheus Exporter Plugin
+    # input plugin that exports metrics
     <source>
-      @type forward
-      port 24444
+      @type prometheus
+      port {{ .Values.metrics.service.port }}
     </source>
 
-    # HTTP input
+    # input plugin that collects metrics from MonitorAgent
+    <source>
+      @type prometheus_monitor
+      <labels>
+        host ${hostname}
+      </labels>
+    </source>
+
+    # input plugin that collects metrics for output plugin
+    <source>
+      @type prometheus_output_monitor
+      <labels>
+        host ${hostname}
+      </labels>
+    </source>
+
+    # input plugin that collects metrics for in_tail plugin
+    <source>
+      @type prometheus_tail_monitor
+      <labels>
+        host ${hostname}
+      </labels>
+    </source>
+    {{- end }}
+
+    # Ignore fluentd own events
+    <match fluent.**>
+      @type null
+    </match>
+
+    # HTTP input for the liveness and readiness probes
     <source>
       @type http
       port 9880
     </source>
 
+    # Throw the healthcheck to the standard output instead of forwarding it
+    <match fluentd.healthcheck>
+      @type stdout
+    </match>
+
+    # Get the logs from the containers running in the node
     <source>
       @type tail
-      @id in_tail_docker
-      path /var/log/docker.log
-      tag docker
+      path /var/log/containers/*.log
+      # exclude Fluentd logs
+      exclude_path /var/log/containers/*fluentd*.log
+      pos_file /opt/bitnami/fluentd/logs/buffers/fluentd-docker.pos
+      tag kubernetes.*
+      read_from_head true
       <parse>
         @type regexp
-        expression /^time="(?<time>[^)]*)" level=(?<severity>[^ ]*) msg="(?<message>[^"]*)"( err="(?<error>[^"]*)")?( statusCode=($<status_code>\d+))?/
+        expression /^(?<time>.+) (?<stream>stdout|stderr) [^ ]* (?<log>.*)$/
+        time_format %Y-%m-%dT%H:%M:%S.%NZ
       </parse>
     </source>
 
-    # Log Forwarding
+    # enrich with kubernetes metadata
+    <filter kubernetes.**>
+      @type kubernetes_metadata
+    </filter>
+
+    # Forward all logs to the aggregators
     <match **>
       @type forward
       {{- $fullName := (include "fluentd.fullname" .) }}
       {{- $global := . }}
-      {{- $domain := .Values.clusterDomain }}
+      {{- $domain := default "cluster.local" .Values.clusterDomain }}
+      {{- $port := .Values.aggregator.port | int }}
       {{- range $i, $e := until (.Values.aggregator.replicaCount | int) }}
       <server>
         {{ printf "host %s-%d.%s-headless.%s.svc.%s" $fullName $i $fullName $global.Release.Namespace $domain }}
-        port 24444
+        {{ printf "port %d" $port }}
         {{- if ne $i 0 }}
         standby
         {{- end }}
@@ -45,6 +95,10 @@ data:
       {{- end}}
 
       <buffer>
-        flush_interval 10s
+        @type file
+        path /opt/bitnami/fluentd/logs/buffers/logs.buffer
+        flush_thread_count 2
+        flush_interval 5s
       </buffer>
     </match>
+{{- end -}}
