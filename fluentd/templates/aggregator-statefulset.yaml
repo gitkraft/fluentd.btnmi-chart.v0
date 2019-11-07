@@ -1,3 +1,4 @@
+{{- if .Values.aggregator.enabled -}}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -40,12 +41,14 @@ spec:
         {{- toYaml .Values.aggregator.extraEnv | nindent 12 }}
         {{- end }}
         ports:
-        - name: http
-          containerPort: 9880
-          protocol: TCP
+        {{- if .Values.aggregator.port }}
         - name: tcp
           containerPort: {{ .Values.aggregator.port }}
           protocol: TCP
+        {{- end }}
+        {{- if .Values.aggregator.containerPorts }}
+        {{- toYaml .Values.aggregator.containerPorts | nindent 8 }}
+        {{- end }}
         {{- if .Values.metrics.enabled }}
         - name: metrics
           containerPort: {{ .Values.metrics.service.port }}
@@ -108,3 +111,4 @@ spec:
       {{- with .Values.aggregator.tolerations }}
       tolerations: {{- toYaml . | nindent 8 }}
       {{- end }}
+{{- end -}}
