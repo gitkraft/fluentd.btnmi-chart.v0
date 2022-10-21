@@ -191,9 +191,11 @@ forwarder:
         </parse>
       </source>
       # enrich with kubernetes metadata
+      {{- if or .Values.forwarder.serviceAccount.create .Values.forwarder.serviceAccount.name }}
       <filter kubernetes.**>
         @type kubernetes_metadata
       </filter>
+      {{- end }}
     fluentd-output.conf: |
       # Throw the healthcheck to the standard output instead of forwarding it
       <match fluentd.healthcheck>
@@ -1335,7 +1337,7 @@ metrics:
     ##
     metricRelabelings: []
     ## @param metrics.serviceMonitor.selector Prometheus instance selector labels
-    ## ref: https://github.com/bitnami/charts/tree/master/bitnami/prometheus-operator#prometheus-configuration
+    ## ref: https://github.com/bitnami/charts/tree/main/bitnami/prometheus-operator#prometheus-configuration
     ## e.g:
     ## selector:
     ##   prometheus: my-prometheus
